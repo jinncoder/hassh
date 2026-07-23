@@ -1,0 +1,42 @@
+services:
+  sshproxy:
+    build: .
+    volumes:
+      # Persists the SQLite DB across `docker compose watch` rebuilds --
+      # without this, every rebuild recreates the container from a fresh
+      # image and loses it.
+      - proxy-data:/data
+    # By default this points at the throwaway `testsshd` service below, so
+    # `docker compose watch` works with no setup. To front a real SSH
+    # server instead, point -target at it directly (any reachable
+    # host:port), or use host.docker.internal:22 to reach an sshd running
+    # on your own machine -- works out of the box on Docker Desktop
+    # (macOS/Windows); on Linux it needs the extra_hosts entry below
+    # (Docker Engine >= 20.10).
+    command: ["-listen", ":2222", "-target", "testsshd:22", "-db", "/data/ssh_connections.db"]
+    depends_on:
+      testsshd:
+        condition: service_healthy
+    # NewServer fails fast at startup if it can't reach -target (see
+    # pkg/proxy/server.go) -- restart automatically rather than requiring a
+    # manual `docker compose watch` re-run if that ever races on startup.
+    restart: on-failure
+    develop:
+      watch:
+        # Go is compiled, not hot-reloadable, so any source or dependency
+        # change needs a full rebuild + container recreate -- exactly what
+        # the "rebuild" action does (equivalent to Compose running
+        # `docker compose up --build sshproxy` for you automatically).
+        # .dockerignore rules (.git, tmp, *.db, etc.) apply here too.
+        - action: rebuild
+          path: .
+
+  # Throwaway SSH server used only so sshproxy has something real to front
+  # out of the box -- see testsshd/Dockerfile. Not for production use, and
+  # not reachable from the host: there's no ports: mapping for it, only the
+  # sshproxy service can reach it, over the internal Compose network.
+  testsshd:
+    build: ./testsshd
+
+volumes:
+  proxy-data:

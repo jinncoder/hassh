@@ -3,7 +3,6 @@ module sshproxy
 go 1.25.7
 
 require (
-	github.com/bits-and-blooms/bloom/v3 v3.7.1
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
@@ -50,7 +49,6 @@ require (
 )
 
 require (
-	github.com/bits-and-blooms/bitset v1.24.4 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/mattn/go-sqlite3 v1.14.34 // indirect

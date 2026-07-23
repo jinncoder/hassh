@@ -12,14 +12,30 @@ import (
 )
 
 const (
-	// maxNameListLength prevents DoS via excessive memory allocation
-	// Reduced to realistic limit based on actual SSH usage
-	maxNameListLength = 64 * 1024 // 64KB safety limit
+	// maxPayloadSize prevents DoS via huge KEXINIT packets
+	maxPayloadSize = 16 * 1024 // 16KB
+
+	// maxNameListLength prevents DoS via excessive memory allocation for a
+	// single name-list. A name-list can never legitimately exceed the total
+	// KEXINIT payload it's embedded in, so this is tied to maxPayloadSize
+	// rather than an independent (and previously unreachable) constant --
+	// the per-list check below is a cheap early rejection; the precise
+	// "enough bytes remain" check that follows is what actually matters.
+	maxNameListLength = maxPayloadSize
 
 	// maxAlgorithmCount prevents DoS via excessive algorithm parsing
 	maxAlgorithmCount = 1000
 
-	// maxAlgorithmNameLength prevents DoS via single huge algorithm name
+	// maxAlgorithmNameLength prevents DoS via single huge algorithm name.
+	//
+	// NOTE: RFC 4251 §6 requires algorithm/method identifiers to be at most
+	// 64 characters. This is deliberately looser (128) because this package
+	// is a passive fingerprinter, not a conforming SSH peer: real-world
+	// clients occasionally send slightly non-compliant names (vendor
+	// extensions, "@"-suffixed local names, typos in obscure forks), and
+	// hard-rejecting those would lose fingerprinting coverage rather than
+	// protect anything -- we never negotiate or act on these names, only
+	// hash them. 128 remains a firm upper bound against pathological input.
 	maxAlgorithmNameLength = 128
 
 	// maxTotalAlgorithms limits total algorithms across all name-lists
@@ -27,9 +43,6 @@ const (
 
 	// SSH_MSG_KEXINIT message type
 	sshMsgKexInit = 20
-
-	// maxPayloadSize prevents DoS via huge KEXINIT packets
-	maxPayloadSize = 16 * 1024 // 16KB
 )
 
 var (
@@ -69,22 +82,27 @@ const (
 	HashSHA256
 )
 
-// isValidAlgorithmName validates algorithm name per SSH RFC specifications
-// Uses constant-time validation to prevent timing side-channels
+// isValidAlgorithmName validates algorithm name per SSH RFC specifications.
+//
+// NOTE on the full-scan (no early-return) loop below: algorithm names in
+// SSH_MSG_KEXINIT are sent in cleartext on the wire by design (that's the
+// entire premise of HASSH fingerprinting), so there is no confidentiality
+// boundary here for a network attacker's timing measurements to cross --
+// early-returning would not leak anything a packet capture doesn't already
+// reveal directly. The full scan is kept anyway as cheap, harmless defensive
+// style (uniform validation cost regardless of input shape), not because it
+// closes an actual side-channel.
 func isValidAlgorithmName(name string) bool {
 	if len(name) == 0 || len(name) > maxAlgorithmNameLength {
 		return false
 	}
 
-	// Constant-time validation: always check all bytes
-	// Prevents timing attacks that could fingerprint algorithm names
 	valid := true
 	for i := 0; i < len(name); i++ {
 		c := name[i]
 		// Must be ASCII printable (33-126), excluding comma (44)
 		if c < 33 || c > 126 || c == 44 {
 			valid = false
-			// Don't return early - continue to prevent timing leak
 		}
 	}
 

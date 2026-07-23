@@ -41,9 +41,16 @@ func (IPAddress) TableName() string {
 }
 
 // HASSHFingerprint stores unique HASSH fingerprints
+//
+// size:64 accommodates hex-encoded SHA-256 (64 chars); hex-encoded MD5 (32
+// chars, the default used by hassh.Calculate) fits comfortably within it too.
+// A 32-char column would silently truncate or fail to insert a SHA-256
+// fingerprint produced via hassh.CalculateWithHash(..., hassh.HashSHA256),
+// which is part of this package's public API even though the proxy's
+// current call site only ever produces MD5 hashes.
 type HASSHFingerprint struct {
 	ID          uint      `gorm:"primaryKey;column:id"`
-	Fingerprint string    `gorm:"column:fingerprint;uniqueIndex;size:32;not null"`
+	Fingerprint string    `gorm:"column:fingerprint;uniqueIndex;size:64;not null"`
 	CreatedAt   time.Time `gorm:"column:created_at;index;not null"`
 }
 
@@ -218,8 +225,19 @@ func (r *Repository) getOrCreateBanner(banner string) (*SSHClientBanner, error) 
 	return &bannerRecord, nil
 }
 
+// maxBannerColumnLength mirrors the size:255 constraint on
+// SSHClientBanner.Banner. Enforced here too (in addition to the proxy's own
+// truncation in CaptureHandshake) so this repository is safe to call with an
+// oversized banner from any caller, not just the one that happens to
+// truncate today.
+const maxBannerColumnLength = 255
+
 // RecordConnection stores connection metadata
 func (r *Repository) RecordConnection(ip, hassh, banner string, blocked bool) error {
+	if len(banner) > maxBannerColumnLength {
+		banner = banner[:maxBannerColumnLength]
+	}
+
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		// Get or create normalized records
 		ipAddr, err := r.getOrCreateIPAddress(ip)
